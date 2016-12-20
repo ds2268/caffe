@@ -192,16 +192,10 @@ ifeq ($(USE_LMDB), 1)
 	LIBRARIES += lmdb
 endif
 ifeq ($(USE_OPENCV), 1)
-<<<<<<< HEAD
 	LIBRARIES += opencv_core opencv_highgui opencv_imgproc opencv_contrib 
-=======
-	LIBRARIES += opencv_core opencv_highgui opencv_imgproc
->>>>>>> 5a201dd960840c319cefd9fa9e2a40d2c76ddd73
-
 	ifeq ($(OPENCV_VERSION), 3)
 		LIBRARIES += opencv_imgcodecs
 	endif
-
 endif
 PYTHON_LIBRARIES ?= boost_python python2.7
 WARNINGS := -Wall -Wno-sign-compare

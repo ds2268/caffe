@@ -1,12 +1,5 @@
 #include <vector>
-
-<<<<<<< HEAD
-#include "caffe/data_layers.hpp"
-#include <iostream>
-using namespace std;
-=======
 #include "caffe/layers/base_data_layer.hpp"
->>>>>>> 5a201dd960840c319cefd9fa9e2a40d2c76ddd73
 
 namespace caffe {
 
@@ -43,28 +36,6 @@ void BasePrefetchingDataLayer<Dtype>::Forward_gpu(
   // copied in meanwhile.
   CUDA_CHECK(cudaStreamSynchronize(cudaStreamDefault));
   prefetch_free_.push(batch);
-
-  //dumpEverything(top);
-}
-
-template <typename Dtype>
-void BasePrefetchingDataLayer<Dtype>::dumpEverything(vector<Blob<Dtype>*> top){
-  static int counter = 1;
-  for(int b = 0; b < 2; b++){
-    char filename[100];
-    sprintf(filename, "top%d_%05d", b, counter);
-    ofstream myfile;
-    myfile.open(filename);
-    int data_length = top[b]->count();
-    
-    //LOG(INFO) << "before copy data: " << filename << "  " << data_length;
-    for(int i = 0; i < data_length; i++){
-      myfile << top[b]->cpu_data()[i] << " ";
-    }
-    //LOG(INFO) << "after copy data: " << filename << "  " << data_length;
-    myfile.close();
-  }
-  counter++;
 }
 
 INSTANTIATE_LAYER_GPU_FORWARD(BasePrefetchingDataLayer);

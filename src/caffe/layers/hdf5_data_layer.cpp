@@ -160,30 +160,6 @@ void HDF5DataLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
             * data_dim], &top[j]->mutable_cpu_data()[i * data_dim]);
     }
   }
-  if(this->layer_param_.hdf5_data_param().debug()){
-    LOG(INFO) << "dump!";
-    dumpEverything(top);
-  }
-}
-
-template <typename Dtype>
-void HDF5DataLayer<Dtype>::dumpEverything(vector<Blob<Dtype>*> top){
-  static int counter = 1;
-  for(int b = 0; b < 3; b++){
-    char filename[100];
-    sprintf(filename, "top%d_%05d", b, counter);
-    ofstream myfile;
-    myfile.open(filename);
-    int data_length = top[b]->count();
-    
-    //LOG(INFO) << "before copy data: " << filename << "  " << data_length;
-    for(int i = 0; i < data_length; i++){
-      myfile << top[b]->cpu_data()[i] << " ";
-    }
-    //LOG(INFO) << "after copy data: " << filename << "  " << data_length;
-    myfile.close();
-  }
-  counter++;
 }
 
 
