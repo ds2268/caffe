@@ -353,7 +353,7 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform(const Datum& dat
   Transform(datum, transformed_data);
 }
 
-template<typename Dtype> void DataTransformer<Dtype>::Transform_nv(const Datum& datum, Blob<Dtype>* transformed_data, Blob<Dtype>* transformed_label, int cnt) {
+template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum& datum, Blob<Dtype>* transformed_data, Blob<Dtype>* transformed_label, int cnt) {
   //std::cout << "Function 2 is used"; std::cout.flush();
   const int datum_channels = datum.channels();
   //const int datum_height = datum.height();
@@ -374,30 +374,21 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_nv(const Datum& 
   //LOG(INFO) << "label shape: " << transformed_label->num() << " " << transformed_label->channels() << " " 
   //                             << transformed_label->height() << " " << transformed_label->width();
 
-  CHECK_EQ(datum_channels, 4);
-  CHECK_EQ(im_channels, 4);
   CHECK_EQ(im_num, lb_num);
-  //CHECK_LE(im_height, datum_height);
-  //CHECK_LE(im_width, datum_width);
   CHECK_GE(im_num, 1);
-
-  //const int crop_size = param_.crop_size();
-
-  // if (crop_size) {
-  //   CHECK_EQ(crop_size, im_height);
-  //   CHECK_EQ(crop_size, im_width);
-  // } else {
-  //   CHECK_EQ(datum_height, im_height);
-  //   CHECK_EQ(datum_width, im_width);
-  // }
 
   Dtype* transformed_data_pointer = transformed_data->mutable_cpu_data();
   Dtype* transformed_label_pointer = transformed_label->mutable_cpu_data();
 
-  Transform_nv(datum, transformed_data_pointer, transformed_label_pointer, cnt); //call function 1
+  CHECK_EQ(datum_channels, 4);
+  if(param_.put_gaussian())
+    CHECK_EQ(im_channels, 4);
+  else
+    CHECK_EQ(im_channels, 3);
+  return Transform_CPM(datum, transformed_data_pointer, transformed_label_pointer, cnt); //call function 1
 }
 
-template<typename Dtype> void DataTransformer<Dtype>::Transform_nv(const Datum& datum, Dtype* transformed_data, Dtype* transformed_label, int cnt) {
+template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum& datum, Dtype* transformed_data, Dtype* transformed_label, int cnt) {
   
   //TODO: some parameter should be set in prototxt
   int clahe_tileSize = param_.clahe_tile_size();
