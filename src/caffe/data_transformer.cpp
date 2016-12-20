@@ -454,7 +454,7 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
     TransformMetaJoints(meta);
 
   //visualize original
-  if(0 && param_.visualize()) 
+  if(param_.visualize()) 
     visualize(img, meta, as);
 
   //Start transforming
@@ -468,12 +468,12 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
     as.degree = augmentation_rotate(img_temp, img_temp2, meta);
     //LOG(INFO) << meta.joint_self.joints.size();
     //LOG(INFO) << meta.joint_self.joints[0];
-    if(0 && param_.visualize()) 
+    if(param_.visualize()) 
       visualize(img_temp2, meta, as);
     as.crop = augmentation_croppad(img_temp2, img_temp3, meta);
     //LOG(INFO) << meta.joint_self.joints.size();
     //LOG(INFO) << meta.joint_self.joints[0];
-    if(0 && param_.visualize()) 
+    if(param_.visualize()) 
       visualize(img_temp3, meta, as);
     as.flip = augmentation_flip(img_temp3, img_aug, meta);
     //LOG(INFO) << meta.joint_self.joints.size();
@@ -505,12 +505,7 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
   
   putGaussianMaps(transformed_data + 3*offset, meta.objpos, 1, img_aug.cols, img_aug.rows, param_.sigma_center());
   //LOG(INFO) << "image transformation done!";
-  generateLabelMap(transformed_label, img_aug, meta);
-
-  //starts to visualize everything (transformed_data in 4 ch, label) fed into conv1
-  //if(param_.visualize()){
-    //dumpEverything(transformed_data, transformed_label, meta);
-  //}
+  generateLabelMap(transformed_label, img_aug, meta); // and visualize
 }
 
 template<typename Dtype>
@@ -816,7 +811,7 @@ void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img
   //LOG(INFO) << "background put";
 
   //visualize
-  if(1 && param_.visualize()){
+  if(param_.visualize_label()){
     Mat label_map;
     for(int i = 0; i < 2*(np+1); i++){      
       label_map = Mat::zeros(grid_y, grid_x, CV_8UC1);
@@ -839,6 +834,10 @@ void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img
       sprintf(imagename, "augment_%04d_label_part_%02d.jpg", meta.write_number, i);
       //LOG(INFO) << "filename is " << imagename;
       imwrite(imagename, label_map);
+    }
+
+    if(meta.write_number >= 10) {
+      LOG(FATAL) << "Had visualized lots of images .... stop now.";
     }
     
     // label_map = Mat::zeros(grid_y, grid_x, CV_8UC1);
@@ -990,7 +989,7 @@ void DataTransformer<Dtype>::visualize(Mat& img, MetaData meta, AugmentSelection
     rectangle(img_vis, Point(0, 0+img_vis.rows), Point(param_.crop_size_x(), param_.crop_size_y()+img_vis.rows), Scalar(255,255,255), 1);
 
     char imagename [100];
-    sprintf(imagename, "augment_%04d_epoch_%d_writenum_%d.jpg", counter, meta.epoch, meta.write_number);
+    sprintf(imagename, "augment_%04d_epoch_%d_writenum_%d.jpg", meta.write_number, meta.epoch, counter%4);
     //LOG(INFO) << "filename is " << imagename;
     imwrite(imagename, img_vis);
   }

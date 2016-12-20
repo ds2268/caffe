@@ -458,6 +458,7 @@ message TransformationParameter {
   optional uint32 np_in_lmdb = 35 [default = 16];
   optional bool transform_body_joint = 38 [default = true];
   optional bool put_gaussian = 39 [default = true];
+  optional bool visualize_label = 40 [default = false];
 }
 
 // Message that stores parameters used by ROIPoolingLayer
