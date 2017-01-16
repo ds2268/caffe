@@ -115,7 +115,7 @@ void CPMDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     this->transformed_data_.set_cpu_data(top_data + offset_data);
     this->transformed_label_.set_cpu_data(top_label + offset_label);
 
-    this->data_transformer_->Transform_CPM(datum, 
+    this->data_transformer_->Transform_CPM(datum,
         &(this->transformed_data_),
         &(this->transformed_label_), cnt);
     ++cnt;

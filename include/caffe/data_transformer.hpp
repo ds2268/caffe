@@ -193,6 +193,7 @@ class DataTransformer {
   void Transform(const Datum& datum, Dtype* transformed_data);
   void Transform_CPM(const Datum& datum, Dtype* transformed_data, Dtype* transformed_label, int cnt);
   void ReadMetaData(MetaData& meta, const string& data, size_t offset3, size_t offset1);
+  void ReadMetaDataCOCO(MetaData& meta, const string& data, size_t offset3, size_t offset1);
   void TransformMetaJoints(MetaData& meta);
   void TransformJoints(Joints& joints);
   void clahe(Mat& img, int, int);

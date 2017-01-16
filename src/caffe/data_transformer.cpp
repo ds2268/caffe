@@ -37,6 +37,7 @@ string DecodeString(const string& data, size_t idx) {
   return result;
 }
 
+// This method reads metadata for original datasets used that is encoded as 4-th channel in the lmdb Datum sample
 template<typename Dtype>
 void DataTransformer<Dtype>::ReadMetaData(MetaData& meta, const string& data, size_t offset3, size_t offset1) { //very specific to genLMDB.py
   // ------------------- Dataset name ----------------------
@@ -127,6 +128,95 @@ void DataTransformer<Dtype>::ReadMetaData(MetaData& meta, const string& data, si
   }
 }
 
+// This method reads metadata for COCO dataset that is encoded as 4-th channel in the lmdb Datum sample
+template<typename Dtype>
+void DataTransformer<Dtype>::ReadMetaDataCOCO(MetaData& meta, const string& data, size_t offset3, size_t offset1) { //very specific to genLMDB_COCO.py
+  // ------------------- Dataset name ----------------------
+  meta.dataset = DecodeString(data, offset3);
+  //LOG(INFO) << "DATASET: " << meta.dataset;
+
+  // ------------------- Image Dimension -------------------
+  float height, width;
+  DecodeFloats(data, offset3+offset1, &height, 1);
+  DecodeFloats(data, offset3+offset1+4, &width, 1);
+  meta.img_size = Size(width, height);
+  //LOG(INFO) << "HEIGHT: " << height << " WIDTH: " << width;
+
+  // ----------- Validation, nop, counters -----------------
+  meta.isValidation = (data[offset3+2*offset1]==0 ? false : true);
+  meta.numOtherPeople = (int)data[offset3+2*offset1+1];
+  meta.people_index = (int)data[offset3+2*offset1+2];
+  float annolist_index;
+  DecodeFloats(data, offset3+2*offset1+3, &annolist_index, 1);
+  meta.annolist_index = (int) annolist_index;
+  float write_number;
+  DecodeFloats(data, offset3+2*offset1+7, &write_number, 1);
+  meta.write_number = (int)write_number;
+  //LOG(INFO) << "VALIDATION: " << meta.isValidation << " NOP: " << meta.numOtherPeople << " P_IDX: " << meta.people_index << " ANNO_IDX: " << meta.annolist_index << " WRT_NUM: " << meta.write_number;
+
+  // count epochs according to counters
+  static int cur_epoch = -1;
+  if(meta.write_number == 1){
+    cur_epoch++;
+  }
+  meta.epoch = cur_epoch;
+
+  // ------------ objpos, scale -----------------------
+  float x, y;
+  DecodeFloats(data, offset3+3*offset1, &x, 1);
+  DecodeFloats(data, offset3+3*offset1+4, &y, 1);
+  DecodeFloats(data, offset3+3*offset1+8, &width, 1);
+  DecodeFloats(data, offset3+3*offset1+12, &height, 1);
+  meta.objpos.x = (x +  x + width) / 2;
+  meta.objpos.y = (y + y + height) / 2;
+  meta.scale_self = height / 368;
+  //LOG(INFO) << "OBJ_X: " << x << " OBJ_Y: " << y << " WIDTH: " << width << " HEIGHT:" << height << " SCALE: " << meta.scale_self;
+
+  // ------------ joint_self --------------------------
+  meta.joint_self.joints.resize(np_in_lmdb);
+  meta.joint_self.isVisible.resize(np_in_lmdb);
+  //LOG(INFO) << "JOINTS-SELF";
+  for(int i=0; i<np_in_lmdb; i++){
+    DecodeFloats(data, offset3+4*offset1+4*i, &meta.joint_self.joints[i].x, 1);
+    DecodeFloats(data, offset3+5*offset1+4*i, &meta.joint_self.joints[i].y, 1);
+    float isVisible;
+    DecodeFloats(data, offset3+6*offset1+4*i, &isVisible, 1);
+    meta.joint_self.isVisible[i] = (int) isVisible;
+    //LOG(INFO) << meta.joint_self.joints[i].x << " " << meta.joint_self.joints[i].y << " " << isVisible;
+  }
+  //LOG(INFO) << "END JOINTS-SELF";
+
+  // other people
+  meta.objpos_other.resize(meta.numOtherPeople);
+  meta.scale_other.resize(meta.numOtherPeople);
+  meta.joint_others.resize(meta.numOtherPeople);
+  //LOG(INFO) << "OTHER PEOPLE";
+  for(int p=0; p<meta.numOtherPeople; p++){
+      // objpos and scale
+      DecodeFloats(data, offset3+(7+p*4)*offset1, &x, 1);
+      DecodeFloats(data, offset3+(7+p*4)*offset1+4, &y, 1);
+      DecodeFloats(data, offset3+(7+p*4)*offset1+8, &width, 1);
+      DecodeFloats(data, offset3+(7+p*4)*offset1+12, &height, 1);
+      meta.objpos_other[p].x = (x + x + width) / 2;
+      meta.objpos_other[p].y = (y + y + height) / 2;
+      meta.scale_other[p] = height / 368;
+
+      //LOG(INFO) << "OBJ_X: " << x << " OBJ_Y: " << y << " WIDTH: " << width << " HEIGHT:" << height << " SCALE: " << meta.scale_other[p];
+
+      // joints
+      meta.joint_others[p].joints.resize(np_in_lmdb);
+      meta.joint_others[p].isVisible.resize(np_in_lmdb);
+      for(int j = 0; j < np_in_lmdb; j++){
+          DecodeFloats(data, offset3+(8+p*4)*offset1+j*4, &meta.joint_others[p].joints[j].x, 1);
+          DecodeFloats(data, offset3+(9+p*4)*offset1+j*4, &meta.joint_others[p].joints[j].y, 1);
+          float isVisible;
+          DecodeFloats(data, offset3+(10+p*4)*offset1+j*4, &isVisible, 1);
+          meta.joint_others[p].isVisible[j] = (int) isVisible;
+          //LOG(INFO) << meta.joint_others[p].joints[j].x << " " << meta.joint_others[p].joints[j].y << " " << isVisible;
+      }
+  }
+}
+
 template<typename Dtype>
 void DataTransformer<Dtype>::SetAugTable(int numData){
   aug_degs.resize(numData);     
@@ -149,12 +239,6 @@ void DataTransformer<Dtype>::SetAugTable(int numData){
       flip_file >> aug_flips[i][j];
     }
   }
-  // for(int i = 0; i < numData; i++){
-  //   for(int j = 0; j < param_.num_total_augs(); j++){
-  //     printf("%d ", (int)aug_degs[i][j]);
-  //   }
-  //   printf("\n");
-  // }
 }
 
 template<typename Dtype>
@@ -237,7 +321,6 @@ template<typename Dtype> DataTransformer<Dtype>::DataTransformer(const Transform
 }
 
 template<typename Dtype> void DataTransformer<Dtype>::Transform(const Datum& datum, Dtype* transformed_data) {
-  //LOG(INFO) << "Function 1 is used";
   const string& data = datum.data();
   const int datum_channels = datum.channels();
   const int datum_height = datum.height();
@@ -354,25 +437,10 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform(const Datum& dat
 }
 
 template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum& datum, Blob<Dtype>* transformed_data, Blob<Dtype>* transformed_label, int cnt) {
-  //std::cout << "Function 2 is used"; std::cout.flush();
   const int datum_channels = datum.channels();
-  //const int datum_height = datum.height();
-  //const int datum_width = datum.width();
-
   const int im_channels = transformed_data->channels();
-  //const int im_height = transformed_data->height();
-  //const int im_width = transformed_data->width();
   const int im_num = transformed_data->num();
-
-  //const int lb_channels = transformed_label->channels();
-  //const int lb_height = transformed_label->height();
-  //const int lb_width = transformed_label->width();
   const int lb_num = transformed_label->num();
-
-  //LOG(INFO) << "image shape: " << transformed_data->num() << " " << transformed_data->channels() << " " 
-  //                             << transformed_data->height() << " " << transformed_data->width();
-  //LOG(INFO) << "label shape: " << transformed_label->num() << " " << transformed_label->channels() << " " 
-  //                             << transformed_label->height() << " " << transformed_label->width();
 
   CHECK_EQ(im_num, lb_num);
   CHECK_GE(im_num, 1);
@@ -385,15 +453,15 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
     CHECK_EQ(im_channels, 4);
   else
     CHECK_EQ(im_channels, 3);
-  return Transform_CPM(datum, transformed_data_pointer, transformed_label_pointer, cnt); //call function 1
+
+  return Transform_CPM(datum, transformed_data_pointer, transformed_label_pointer, cnt);
 }
 
 template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum& datum, Dtype* transformed_data, Dtype* transformed_label, int cnt) {
   
-  //TODO: some parameter should be set in prototxt
   int clahe_tileSize = param_.clahe_tile_size();
   int clahe_clipLimit = param_.clahe_clip_limit();
-  //float targetDist = 41.0/35.0;
+
   AugmentSelection as = {
     false,
     0.0,
@@ -407,18 +475,11 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
   const int datum_height = datum.height();
   const int datum_width = datum.width();
 
-  //const int crop_size = param_.crop_size();
-  //const Dtype scale = param_.scale();
-  //const bool do_mirror = param_.mirror() && Rand(2);
-  //const bool has_mean_file = param_.has_mean_file();
   const bool has_uint8 = data.size() > 0;
-  //const bool has_mean_values = mean_values_.size() > 0;
   int crop_x = param_.crop_size_x();
   int crop_y = param_.crop_size_y();
 
   CHECK_GT(datum_channels, 0);
-  //CHECK_GE(datum_height, crop_size);
-  //CHECK_GE(datum_width, crop_size);
 
   //before any transformation, get the image from datum
   Mat img = Mat::zeros(datum_height, datum_width, CV_8UC3);
@@ -439,7 +500,7 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
     }
   }
 
-  //color, contract
+  //color, contrast
   if(param_.do_clahe())
     clahe(img, clahe_tileSize, clahe_clipLimit);
   if(param_.gray() == 1){
@@ -449,9 +510,10 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
 
   int offset3 = 3 * offset;
   int offset1 = datum_width;
-  ReadMetaData(meta, data, offset3, offset1);
-  if(param_.transform_body_joint()) // we expect to transform body joints, and not to transform hand joints
-    TransformMetaJoints(meta);
+  ReadMetaDataCOCO(meta, data, offset3, offset1);
+
+  //if(param_.transform_body_joint()) // we expect to transform body joints, and not to transform hand joints
+    //TransformMetaJoints(meta);
 
   //visualize original
   if(param_.visualize()) 
@@ -459,26 +521,23 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
 
   //Start transforming
   Mat img_aug = Mat::zeros(crop_y, crop_x, CV_8UC3);
-  Mat img_temp, img_temp2, img_temp3; //size determined by scale
+  Mat img_temp, img_temp2, img_temp3; // size determined by scale
   // We only do random transform as augmentation when training.
   if (phase_ == TRAIN) {
     as.scale = augmentation_scale(img, img_temp, meta);
-    //LOG(INFO) << meta.joint_self.joints.size();
-    //LOG(INFO) << meta.joint_self.joints[0];
     as.degree = augmentation_rotate(img_temp, img_temp2, meta);
-    //LOG(INFO) << meta.joint_self.joints.size();
-    //LOG(INFO) << meta.joint_self.joints[0];
-    if(param_.visualize()) 
+
+    if(param_.visualize()) // visualize scale and orientation
       visualize(img_temp2, meta, as);
+
     as.crop = augmentation_croppad(img_temp2, img_temp3, meta);
-    //LOG(INFO) << meta.joint_self.joints.size();
-    //LOG(INFO) << meta.joint_self.joints[0];
-    if(param_.visualize()) 
+
+    if(param_.visualize())  // visualize crop
       visualize(img_temp3, meta, as);
+
     as.flip = augmentation_flip(img_temp3, img_aug, meta);
-    //LOG(INFO) << meta.joint_self.joints.size();
-    //LOG(INFO) << meta.joint_self.joints[0];
-    if(param_.visualize()) 
+
+    if(param_.visualize()) // visualize flip
       visualize(img_aug, meta, as);
   }
   else {
@@ -488,6 +547,8 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
     as.flip = 0;
     as.degree = 0;
   }
+
+
   //LOG(INFO) << "scale: " << as.scale << "; crop:(" << as.crop.width << "," << as.crop.height 
   //          << "); flip:" << as.flip << "; degree: " << as.degree;
 
@@ -504,22 +565,22 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
   }
   
   putGaussianMaps(transformed_data + 3*offset, meta.objpos, 1, img_aug.cols, img_aug.rows, param_.sigma_center());
-  //LOG(INFO) << "image transformation done!";
   generateLabelMap(transformed_label, img_aug, meta); // and visualize
 }
 
+// scale augmentation
 template<typename Dtype>
 float DataTransformer<Dtype>::augmentation_scale(Mat& img_src, Mat& img_temp, MetaData& meta) {
   float dice = static_cast <float> (rand()) / static_cast <float> (RAND_MAX); //[0,1]
   float scale_multiplier;
-  //float scale = (param_.scale_max() - param_.scale_min()) * dice + param_.scale_min(); //linear shear into [scale_min, scale_max]
+  // no scaling
   if(dice > param_.scale_prob()) {
     img_temp = img_src.clone();
     scale_multiplier = 1;
   }
   else {
     float dice2 = static_cast <float> (rand()) / static_cast <float> (RAND_MAX); //[0,1]
-    scale_multiplier = (param_.scale_max() - param_.scale_min()) * dice2 + param_.scale_min(); //linear shear into [scale_min, scale_max]
+    scale_multiplier = (param_.scale_max() - param_.scale_min()) * dice2 + param_.scale_min(); //   linear shear into [scale_min, scale_max]
   }
   float scale_abs = param_.target_dist()/meta.scale_self;
   float scale = scale_abs * scale_multiplier;
@@ -538,6 +599,7 @@ float DataTransformer<Dtype>::augmentation_scale(Mat& img_src, Mat& img_temp, Me
   return scale_multiplier;
 }
 
+// check if point on image
 template<typename Dtype>
 bool DataTransformer<Dtype>::onPlane(Point p, Size img_size) {
   if(p.x < 0 || p.y < 0) return false;
@@ -545,6 +607,7 @@ bool DataTransformer<Dtype>::onPlane(Point p, Size img_size) {
   return true;
 }
 
+// crop augmentation
 template<typename Dtype>
 Size DataTransformer<Dtype>::augmentation_croppad(Mat& img_src, Mat& img_dst, MetaData& meta) {
   float dice_x = static_cast <float> (rand()) / static_cast <float> (RAND_MAX); //[0,1]
@@ -555,8 +618,6 @@ Size DataTransformer<Dtype>::augmentation_croppad(Mat& img_src, Mat& img_dst, Me
   float x_offset = int((dice_x - 0.5) * 2 * param_.center_perterb_max());
   float y_offset = int((dice_y - 0.5) * 2 * param_.center_perterb_max());
 
-  //LOG(INFO) << "Size of img_temp is " << img_temp.cols << " " << img_temp.rows;
-  //LOG(INFO) << "ROI is " << x_offset << " " << y_offset << " " << min(800, img_temp.cols) << " " << min(256, img_temp.rows);
   Point2i center = meta.objpos + Point2f(x_offset, y_offset);
   int offset_left = -(center.x - (crop_x/2));
   int offset_up = -(center.y - (crop_y/2));
@@ -590,6 +651,7 @@ Size DataTransformer<Dtype>::augmentation_croppad(Mat& img_src, Mat& img_dst, Me
   return Size(x_offset, y_offset);
 }
 
+// swap limb annotation for horizontal flip
 template<typename Dtype>
 void DataTransformer<Dtype>::swapLeftRight(Joints& j) {
   
@@ -638,14 +700,25 @@ void DataTransformer<Dtype>::swapLeftRight(Joints& j) {
       j.isVisible[ri] = j.isVisible[li];
       j.isVisible[li] = temp_v;
     }
+   } // COCO
+  // 0) nose
+  // 1) left_eye 3) left_ear  5) left_shoulder 7) left_elbow 9) left_wrist 11) left_hip 13) left_knee 15) left_ankle
+  // 2) right_eye 4) right_ear 6) right_shoulder 8) right_elbow 10) right_wrist 12) right_hip 14) right_knee 16) right_ankle
+  else if(np == 17){
+      for (int i = 1; i < np - 1; i+=2) {
+          Point2f temp = j.joints[i];
+          j.joints[i] = j.joints[i+1];
+          j.joints[i+1] = temp;
+      }
   }
 }
 
+// horizontal flip augmentation
 template<typename Dtype>
 bool DataTransformer<Dtype>::augmentation_flip(Mat& img_src, Mat& img_aug, MetaData& meta) {
   bool doflip;
   if(param_.aug_way() == "rand"){
-    float dice = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    float dice = static_cast <float> (rand()) / static_cast <float> (RAND_MAX); // [0,1]
     doflip = (dice <= param_.flip_prob());
   }
   else if(param_.aug_way() == "table"){
@@ -653,11 +726,11 @@ bool DataTransformer<Dtype>::augmentation_flip(Mat& img_src, Mat& img_aug, MetaD
   }
   else {
     doflip = 0;
-    LOG(INFO) << "Unhandled exception!!!!!!";
+    LOG(INFO) << "Unhandled exception! [FLIPPING]";
   }
 
   if(doflip){
-    flip(img_src, img_aug, 1);
+    flip(img_src, img_aug, 1);  // 1 = flipping horizontally
     int w = img_src.cols;
 
     meta.objpos.x = w - 1 - meta.objpos.x;
@@ -693,12 +766,13 @@ void DataTransformer<Dtype>::RotatePoint(Point2f& p, Mat R){
   p.y = new_point.at<double>(1,0);
 }
 
+// rotation augmentation
 template<typename Dtype>
 float DataTransformer<Dtype>::augmentation_rotate(Mat& img_src, Mat& img_dst, MetaData& meta) {
   
   float degree;
   if(param_.aug_way() == "rand"){
-    float dice = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    float dice = static_cast <float> (rand()) / static_cast <float> (RAND_MAX); // [0,1]
     degree = (dice - 0.5) * 2 * param_.max_rotate_degree();
   }
   else if(param_.aug_way() == "table"){
@@ -706,7 +780,7 @@ float DataTransformer<Dtype>::augmentation_rotate(Mat& img_src, Mat& img_dst, Me
   }
   else {
     degree = 0;
-    LOG(INFO) << "Unhandled exception!!!!!!";
+    LOG(INFO) << "Unhandled exception! [ROTATE]";
   }
   
   Point2f center(img_src.cols/2.0, img_src.rows/2.0);
@@ -715,8 +789,6 @@ float DataTransformer<Dtype>::augmentation_rotate(Mat& img_src, Mat& img_dst, Me
   // adjust transformation matrix
   R.at<double>(0,2) += bbox.width/2.0 - center.x;
   R.at<double>(1,2) += bbox.height/2.0 - center.y;
-  //LOG(INFO) << "R=[" << R.at<double>(0,0) << " " << R.at<double>(0,1) << " " << R.at<double>(0,2) << ";" 
-  //          << R.at<double>(1,0) << " " << R.at<double>(1,1) << " " << R.at<double>(1,2) << "]";
   warpAffine(img_src, img_dst, R, bbox.size(), INTER_CUBIC, BORDER_CONSTANT, Scalar(128,128,128));
   
   //adjust meta data
@@ -730,9 +802,11 @@ float DataTransformer<Dtype>::augmentation_rotate(Mat& img_src, Mat& img_dst, Me
       RotatePoint(meta.joint_others[p].joints[i], R);
     }
   }
+
   return degree;
 }
 
+// put gauss peak on a point
 template<typename Dtype>
 void DataTransformer<Dtype>::putGaussianMaps(Dtype* entry, Point2f center, int stride, int grid_x, int grid_y, float sigma){
   //LOG(INFO) << "putGaussianMaps here we start for " << center.x << " " << center.y;
@@ -753,6 +827,7 @@ void DataTransformer<Dtype>::putGaussianMaps(Dtype* entry, Point2f center, int s
   }
 }
 
+// generate label ground truth
 template<typename Dtype>
 void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img_aug, MetaData meta) {
   int rezX = img_aug.cols;
@@ -775,7 +850,7 @@ void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img
   for (int i = 0; i < np; i++){
     //LOG(INFO) << i << meta.numOtherPeople;
     Point2f center = meta.joint_self.joints[i];
-    if(meta.joint_self.isVisible[i] <= 1){
+    if(meta.joint_self.isVisible[i] > 0){
       putGaussianMaps(transformed_label + i*channelOffset, center, param_.stride(), 
                       grid_x, grid_y, param_.sigma()); //self
       putGaussianMaps(transformed_label + (i+np+1)*channelOffset, center, param_.stride(), 
@@ -785,7 +860,7 @@ void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img
     //plot others
     for(int j = 0; j < meta.numOtherPeople; j++){ //for every other person
       Point2f center = meta.joint_others[j].joints[i];
-      if(meta.joint_others[j].isVisible[i] <= 1){
+      if(meta.joint_others[j].isVisible[i] > 0){
         putGaussianMaps(transformed_label + (i+np+1)*channelOffset, center, param_.stride(), 
                         grid_x, grid_y, param_.sigma());
       }
@@ -815,51 +890,23 @@ void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img
     Mat label_map;
     for(int i = 0; i < 2*(np+1); i++){      
       label_map = Mat::zeros(grid_y, grid_x, CV_8UC1);
-      //int MPI_index = MPI_to_ours[i];
-      //Point2f center = meta.joint_self.joints[MPI_index];
       for (int g_y = 0; g_y < grid_y; g_y++){
-        //printf("\n");
         for (int g_x = 0; g_x < grid_x; g_x++){
           label_map.at<uchar>(g_y,g_x) = (int)(transformed_label[i*channelOffset + g_y*grid_x + g_x]*255);
-          //printf("%f ", transformed_label_entry[g_y*grid_x + g_x]*255);
         }
       }
       resize(label_map, label_map, Size(), stride, stride, INTER_LINEAR);
       applyColorMap(label_map, label_map, COLORMAP_JET);
       addWeighted(label_map, 0.5, img_aug, 0.5, 0.0, label_map);
       
-      //center = center * (1.0/(float)param_.stride());
-      //circle(label_map, center, 3, CV_RGB(255,0,255), -1);
       char imagename [100];
       sprintf(imagename, "augment_%04d_label_part_%02d.jpg", meta.write_number, i);
-      //LOG(INFO) << "filename is " << imagename;
       imwrite(imagename, label_map);
     }
 
-    if(meta.write_number >= 10) {
+    /*if(meta.write_number >= 10) {
       LOG(FATAL) << "Had visualized lots of images .... stop now.";
-    }
-    
-    // label_map = Mat::zeros(grid_y, grid_x, CV_8UC1);
-    // for (int g_y = 0; g_y < grid_y; g_y++){
-    //   //printf("\n");
-    //   for (int g_x = 0; g_x < grid_x; g_x++){
-    //     label_map.at<uchar>(g_y,g_x) = (int)(transformed_label[np*channelOffset + g_y*grid_x + g_x]*255);
-    //     //printf("%f ", transformed_label_entry[g_y*grid_x + g_x]*255);
-    //   }
-    // }
-    // resize(label_map, label_map, Size(), stride, stride, INTER_CUBIC);
-    // applyColorMap(label_map, label_map, COLORMAP_JET);
-    // addWeighted(label_map, 0.5, img_aug, 0.5, 0.0, label_map);
-
-    // for(int i=0;i<np;i++){
-    //   Point2f center = meta.joint_self.joints[i];// * (1.0/param_.stride());
-    //   circle(label_map, center, 3, CV_RGB(100,100,100), -1);
-    // }
-    // char imagename [100];
-    // sprintf(imagename, "augment_%04d_label_part_back.jpg", counter);
-    // //LOG(INFO) << "filename is " << imagename;
-    // imwrite(imagename, label_map);
+    }*/
   }
 }
 
@@ -876,73 +923,12 @@ void setLabel(Mat& im, const std::string label, const Point& org) {
 
 template<typename Dtype>
 void DataTransformer<Dtype>::visualize(Mat& img, MetaData meta, AugmentSelection as) {
-  //Mat img_vis = Mat::zeros(img.rows*2, img.cols, CV_8UC3);
-  //copy image content
-  // for (int i = 0; i < img.rows; ++i) {
-  //   for (int j = 0; j < img.cols; ++j) {
-  //     Vec3b& rgb = img.at<Vec3b>(i, j);
-  //     Vec3b& rgb_vis_upper = img_vis.at<Vec3b>(i, j);
-  //     rgb_vis_upper = rgb;
-  //   }
-  // }
-  // for (int i = 0; i < img_aug.rows; ++i) {
-  //   for (int j = 0; j < img_aug.cols; ++j) {
-  //     Vec3b& rgb_aug = img_aug.at<Vec3b>(i, j);
-  //     Vec3b& rgb_vis_lower = img_vis.at<Vec3b>(i + img.rows, j);
-  //     rgb_vis_lower = rgb_aug;
-  //   }
-  // }
   Mat img_vis = img.clone();
   static int counter = 0;
 
   rectangle(img_vis, meta.objpos-Point2f(3,3), meta.objpos+Point2f(3,3), CV_RGB(255,255,0), CV_FILLED);
   for(int i=0;i<np;i++){
-    //LOG(INFO) << "drawing part " << i << ": ";
-    //LOG(INFO) << meta.joint_self.joints.size();
-    //LOG(INFO) << meta.joint_self.joints[i];
-    //if(meta.joint_self.isVisible[i])
-    if(np == 21){ // hand case
-      if(i < 4)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,0,255), -1);
-      else if(i < 6 || i == 12 || i == 13)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,0,0), -1);
-      else if(i < 8 || i == 14 || i == 15)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,255,0), -1);
-      else if(i < 10|| i == 16 || i == 17)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,100,0), -1);
-      else if(i < 12|| i == 18 || i == 19)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,100,100), -1);
-      else 
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,100,100), -1);
-    }
-    else if(np == 9){
-      if(i==0 || i==1 || i==2 || i==6)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,0,255), -1);
-      else if(i==3 || i==4 || i==5 || i==7)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,0,0), -1);
-      else
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,255,0), -1);
-    }
-    else if(np == 14 || np == 28) {//body case
-      if(i < 14){
-        if(i==2 || i==3 || i==4 || i==8 || i==9 || i==10)
-          circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,0,255), -1);
-        else if(i==5 || i==6 || i==7 || i==11 || i==12 || i==13)
-          circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,0,0), -1);
-        else
-          circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,255,0), -1);
-      }
-      else if(i < 16)
-        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,255,0), -1);
-      else {
-        if(i==17 || i==18 || i==19 || i==23 || i==24)
-          circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,0,0), -1);
-        else if(i==20 || i==21 || i==22 || i==25 || i==26)
-          circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,100,100), -1);
-        else
-          circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(255,200,200), -1);
-      }
-    }
+    circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,255,0), -1);
   }
   
   line(img_vis, meta.objpos+Point2f(-368/2,-368/2), meta.objpos+Point2f(368/2,-368/2), CV_RGB(0,255,0), 2);
@@ -953,31 +939,15 @@ void DataTransformer<Dtype>::visualize(Mat& img, MetaData meta, AugmentSelection
   for(int p=0;p<meta.numOtherPeople;p++){
     rectangle(img_vis, meta.objpos_other[p]-Point2f(3,3), meta.objpos_other[p]+Point2f(3,3), CV_RGB(0,255,255), CV_FILLED);
     for(int i=0;i<np;i++){
-      // if(meta.joint_others[p].isVisible[i])
-      //   circle(img_vis, meta.joint_others[p].joints[i], 3, CV_RGB(0,0,255), -1);
-      // else
-      //   circle(img_vis, meta.joint_others[p].joints[i], 3, CV_RGB(0,255,255), -1);
-      
-      //MPII R leg: 0(ankle), 1(knee), 2(hip)
-      //     L leg: 5(ankle), 4(knee), 3(hip)
-      //     R arms: 10(wrist), 11(elbow), 12(shoulder)
-      //     L arms: 13(wrist), 14(elbow), 15(shoulder)
-      //if(i==0 || i==1 || i==2 || i==10 || i==11 || i==12)
-      circle(img_vis, meta.joint_others[p].joints[i], 2, CV_RGB(0,0,0), -1);
-      //else if(i==5 || i==4 || i==3 || i==13 || i==14 || i==15)
-        //circle(img_vis, meta.joint_others[p].joints[i], 3, CV_RGB(0,255,255), -1);
-      //else
-        //circle(img_vis, meta.joint_others[p].joints[i], 3, CV_RGB(255,255,0), -1);
+      circle(img_vis, meta.joint_others[p].joints[i], 2, CV_RGB(0,0,255), -1);
     }
   }
   
   // draw text
   if(phase_ == TRAIN){
     std::stringstream ss;
-    // ss << "Augmenting with:" << (as.flip ? "flip" : "no flip") << "; Rotate " << as.degree << " deg; scaling: " << as.scale << "; crop: " 
-    //    << as.crop.height << "," << as.crop.width;
     ss << meta.dataset << " " << meta.write_number << " index:" << meta.annolist_index << "; p:" << meta.people_index 
-       << "; o_scale: " << meta.scale_self;
+       << "; o_scale: " << meta.scale_self << "; obj_x: " << meta.objpos.x << "; obj_y: " << meta.objpos.y;
     string str_info = ss.str();
     setLabel(img_vis, str_info, Point(0, 20));
 
@@ -990,7 +960,6 @@ void DataTransformer<Dtype>::visualize(Mat& img, MetaData meta, AugmentSelection
 
     char imagename [100];
     sprintf(imagename, "augment_%04d_epoch_%d_writenum_%d.jpg", meta.write_number, meta.epoch, counter%4);
-    //LOG(INFO) << "filename is " << imagename;
     imwrite(imagename, img_vis);
   }
   else {
@@ -999,7 +968,6 @@ void DataTransformer<Dtype>::visualize(Mat& img, MetaData meta, AugmentSelection
 
     char imagename [100];
     sprintf(imagename, "augment_%04d.jpg", counter);
-    //LOG(INFO) << "filename is " << imagename;
     imwrite(imagename, img_vis);
   }
   counter++;
