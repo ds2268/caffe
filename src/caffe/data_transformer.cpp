@@ -161,6 +161,12 @@ void DataTransformer<Dtype>::ReadMetaDataCOCO(MetaData& meta, const string& data
   }
   meta.epoch = cur_epoch;
 
+  if(meta.write_number % 1000 == 0){
+    LOG(INFO) << "dataset: " << meta.dataset <<"; img_size: " << meta.img_size
+        << "; meta.annolist_index: " << meta.annolist_index << "; meta.write_number: " << meta.write_number
+        << "; meta.epoch: " << meta.epoch;
+  }
+
   // ------------ objpos, scale -----------------------
   float x, y;
   DecodeFloats(data, offset3+3*offset1, &x, 1);
@@ -244,14 +250,14 @@ void DataTransformer<Dtype>::SetAugTable(int numData){
 template<typename Dtype>
 void DataTransformer<Dtype>::TransformMetaJoints(MetaData& meta) {
   //transform joints in meta from np_in_lmdb (specified in prototxt) to np (specified in prototxt)
-  TransformJoints(meta.joint_self);
+  TransformJoints(meta.joint_self, meta.objpos, meta.dataset);
   for(int i=0;i<meta.joint_others.size();i++){
-    TransformJoints(meta.joint_others[i]);
+    TransformJoints(meta.joint_others[i], meta.objpos_other[i], meta.dataset);
   }
 }
 
 template<typename Dtype>
-void DataTransformer<Dtype>::TransformJoints(Joints& j) {
+void DataTransformer<Dtype>::TransformJoints(Joints& j, Point2f &obj_pos, const string &dataset) {
   //transform joints in meta from np_in_lmdb (specified in prototxt) to np (specified in prototxt)
   //MPII R leg: 0(ankle), 1(knee), 2(hip)
   //     L leg: 5(ankle), 4(knee), 3(hip)
@@ -261,7 +267,7 @@ void DataTransformer<Dtype>::TransformJoints(Joints& j) {
   //LOG(INFO) << "TransformJoints: here np == " << np << " np_lmdb = " << np_in_lmdb << " joints.size() = " << j.joints.size();
   //assert(joints.size() == np_in_lmdb);
   //assert(np == 14 || np == 28);
-  Joints jo = j;
+  Joints jo;
   if(np == 14){
     int MPI_to_ours[14] = {9, 8, 12, 11, 10, 13, 14, 15, 2, 1, 0, 3, 4, 5};
     jo.joints.resize(np);
@@ -270,6 +276,55 @@ void DataTransformer<Dtype>::TransformJoints(Joints& j) {
       jo.joints[i] = j.joints[MPI_to_ours[i]];
       jo.isVisible[i] = j.isVisible[MPI_to_ours[i]];
     }
+  }
+  else if(np == 17 && param_.dataset_type().compare("JUMP") == 0){
+      // This is used for JUMP + COCO dataset
+      if(dataset.compare("COCO") == 0){
+          //LOG(INFO) << "Changing order of COCO dataset! (COCO example)";
+          // mapping from COCO order to JUMP order
+          int mapping[17] = {0, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15, 1, 2, 3, 4};
+          jo.joints.resize(np);
+          jo.isVisible.resize(np);
+          Point2f avg_pos(0, 0);
+          int n_visible = 0.0;
+          for(int i=0;i<np;i++){
+            jo.joints[i] = j.joints[mapping[i]];
+            jo.isVisible[i] = j.isVisible[mapping[i]];
+
+            // compute center position of a person
+            if(jo.isVisible[i] > 0 && i < 13){
+                n_visible++;
+                avg_pos += jo.joints[i];
+            }
+          }
+          // SKI data is not present in COCO! -> hack -> set visibility to 0
+          jo.isVisible[13] = 0;
+          jo.isVisible[14] = 0;
+          jo.isVisible[15] = 0;
+          jo.isVisible[16] = 0;
+
+          if(n_visible >= 4)
+              obj_pos = avg_pos * (1.0 / n_visible);
+      }
+      else if(dataset.compare("JUMP") == 0){
+          //LOG(INFO) << "JUMP dataset parts are reference ones and don't need changes! (JUMP example)";
+
+          // compute center position of a person
+          Point2f avg_pos(0, 0);
+          int n_visible = 0.0;
+          for(int i=0;i<np;i++){
+              if(j.isVisible[i] && i < 13) {
+                  n_visible++;
+                  avg_pos += j.joints[i];
+              }
+          }
+
+          if(n_visible >= 4)
+              obj_pos = avg_pos * (1.0 / n_visible);
+      }
+      else{
+          throw std::invalid_argument("DATASET must either be COCO or JUMP when np==17!");
+      }
   }
   else if(np == 28){
     int MPI_to_ours_1[28] = {9, 8,12,11,10,13,14,15, 2, 1, 0, 3, 4, 5, 7, 6, \
@@ -300,7 +355,7 @@ template<typename Dtype> DataTransformer<Dtype>::DataTransformer(const Transform
       "Cannot specify mean_file and mean_value at the same time";
     const string& mean_file = param.mean_file();
     if (Caffe::root_solver()) {
-      LOG(INFO) << "Loading mean file from: " << mean_file;
+      //LOG(INFO) << "Loading mean file from: " << mean_file;
     }
     BlobProto blob_proto;
     ReadProtoFromBinaryFileOrDie(mean_file.c_str(), &blob_proto);
@@ -314,7 +369,7 @@ template<typename Dtype> DataTransformer<Dtype>::DataTransformer(const Transform
       mean_values_.push_back(param_.mean_value(c));
     }
   }
-  LOG(INFO) << "DataTransformer constructor done.";
+  //LOG(INFO) << "DataTransformer constructor done.";
   np_in_lmdb = param_.np_in_lmdb();
   np = param_.num_parts();
   is_table_set = false;
@@ -512,8 +567,8 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
   int offset1 = datum_width;
   ReadMetaDataCOCO(meta, data, offset3, offset1);
 
-  //if(param_.transform_body_joint()) // we expect to transform body joints, and not to transform hand joints
-    //TransformMetaJoints(meta);
+  // Check if conversion needed! (ex. COCO to JUMP)
+  TransformMetaJoints(meta);
 
   //visualize original
   if(param_.visualize()) 
@@ -563,8 +618,9 @@ template<typename Dtype> void DataTransformer<Dtype>::Transform_CPM(const Datum&
       transformed_data[3*offset + i*img_aug.cols + j] = 0; //zero 4-th channel
     }
   }
-  
+
   putGaussianMaps(transformed_data + 3*offset, meta.objpos, 1, img_aug.cols, img_aug.rows, param_.sigma_center());
+  //LOG(INFO) << meta.joint_self.joints[0].x << " " << meta.joint_self.joints[0].y << " " << meta.joint_self.isVisible[0];
   generateLabelMap(transformed_label, img_aug, meta); // and visualize
 }
 
@@ -585,6 +641,7 @@ float DataTransformer<Dtype>::augmentation_scale(Mat& img_src, Mat& img_temp, Me
   float scale_abs = param_.target_dist()/meta.scale_self;
   float scale = scale_abs * scale_multiplier;
   resize(img_src, img_temp, Size(), scale, scale, INTER_CUBIC);
+
   //modify meta data
   meta.objpos *= scale;
   for(int i=0; i<np; i++){
@@ -700,18 +757,37 @@ void DataTransformer<Dtype>::swapLeftRight(Joints& j) {
       j.isVisible[ri] = j.isVisible[li];
       j.isVisible[li] = temp_v;
     }
-   } // COCO
+   }
+  else if(np == 17 && param_.dataset_type().compare("JUMP") == 0){
+      //COCO + JUMP
+      int right[8] = {1,3,5,7,9,11,13,14};
+      int left[8] = {2,4,6,8,10,12,15,16};
+      for(int i=0; i<8; i++){
+        int ri = right[i];
+        int li = left[i];
+        Point2f temp = j.joints[ri];
+        j.joints[ri] = j.joints[li];
+        j.joints[li] = temp;
+        int temp_v = j.isVisible[ri];
+        j.isVisible[ri] = j.isVisible[li];
+        j.isVisible[li] = temp_v;
+      }
+     }
+  //COCO
   // 0) nose
   // 1) left_eye 3) left_ear  5) left_shoulder 7) left_elbow 9) left_wrist 11) left_hip 13) left_knee 15) left_ankle
   // 2) right_eye 4) right_ear 6) right_shoulder 8) right_elbow 10) right_wrist 12) right_hip 14) right_knee 16) right_ankle
-  else if(np == 17){
+  else if(np == 17 && param_.dataset_type().compare("COCO") == 0){
       for (int i = 1; i < np - 1; i+=2) {
           Point2f temp = j.joints[i];
           j.joints[i] = j.joints[i+1];
           j.joints[i+1] = temp;
+          int temp_v = j.isVisible[i];
+          j.isVisible[i] = j.isVisible[i+1];
+          j.isVisible[i+1] = temp_v;
       }
   }
-}
+  }
 
 // horizontal flip augmentation
 template<typename Dtype>
@@ -726,7 +802,7 @@ bool DataTransformer<Dtype>::augmentation_flip(Mat& img_src, Mat& img_aug, MetaD
   }
   else {
     doflip = 0;
-    LOG(INFO) << "Unhandled exception! [FLIPPING]";
+    //LOG(INFO) << "Unhandled exception! [FLIPPING]";
   }
 
   if(doflip){
@@ -780,7 +856,7 @@ float DataTransformer<Dtype>::augmentation_rotate(Mat& img_src, Mat& img_dst, Me
   }
   else {
     degree = 0;
-    LOG(INFO) << "Unhandled exception! [ROTATE]";
+    //LOG(INFO) << "Unhandled exception! [ROTATE]";
   }
   
   Point2f center(img_src.cols/2.0, img_src.rows/2.0);
@@ -829,7 +905,7 @@ void DataTransformer<Dtype>::putGaussianMaps(Dtype* entry, Point2f center, int s
 
 // generate label ground truth
 template<typename Dtype>
-void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img_aug, MetaData meta) {
+void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img_aug, MetaData &meta) {
   int rezX = img_aug.cols;
   int rezY = img_aug.rows;
   int stride = param_.stride();
@@ -845,10 +921,8 @@ void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img
       }
     }
   }
-  //LOG(INFO) << "label cleaned";
   
   for (int i = 0; i < np; i++){
-    //LOG(INFO) << i << meta.numOtherPeople;
     Point2f center = meta.joint_self.joints[i];
     if(meta.joint_self.isVisible[i] > 0){
       putGaussianMaps(transformed_label + i*channelOffset, center, param_.stride(), 
@@ -856,7 +930,6 @@ void DataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& img
       putGaussianMaps(transformed_label + (i+np+1)*channelOffset, center, param_.stride(), 
                       grid_x, grid_y, param_.sigma()); //self
     }
-    //LOG(INFO) << "label put for" << i;
     //plot others
     for(int j = 0; j < meta.numOtherPeople; j++){ //for every other person
       Point2f center = meta.joint_others[j].joints[i];
@@ -922,13 +995,31 @@ void setLabel(Mat& im, const std::string label, const Point& org) {
 }
 
 template<typename Dtype>
-void DataTransformer<Dtype>::visualize(Mat& img, MetaData meta, AugmentSelection as) {
+void DataTransformer<Dtype>::visualize(Mat& img, MetaData &meta, AugmentSelection as) {
   Mat img_vis = img.clone();
   static int counter = 0;
 
+  string limbs_jump[] = {"nose", "right_shoulder", "left_shoulder", "right_elbow", "left_elbow", "right_wrist", "left_wrist", "right_hip", "left_hip",
+                 "right_knee", "left_knee", "right_ankle", "left_ankle", "right_ski_f", "right_ski_b", "left_ski_f", "left_ski_b"};
+
+  string limbs_coco[] = {"nose", "right_shoulder", "left_shoulder", "right_elbow", "left_elbow", "right_wrist", "left_wrist", "right_hip", "left_hip",
+                 "right_knee", "left_knee", "right_ankle", "left_ankle", "right_ski_f", "right_ski_b", "left_ski_f", "left_ski_b"};
+
+  string *limbs;
+  if(param_.dataset_type().compare("JUMP") == 0)
+      limbs = limbs_jump;
+  else if(param_.dataset_type().compare("COCO") == 0)
+      limbs = limbs_jump;
+  else
+      throw std::invalid_argument("dataset_type must either be JUMP or COCO!");
+
   rectangle(img_vis, meta.objpos-Point2f(3,3), meta.objpos+Point2f(3,3), CV_RGB(255,255,0), CV_FILLED);
   for(int i=0;i<np;i++){
-    circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,255,0), -1);
+    // plot only visible joints
+    if(meta.joint_self.isVisible[i] > 0)
+        circle(img_vis, meta.joint_self.joints[i], 3, CV_RGB(0,255,0), -1);
+        if(param_.visualize_names())
+            putText(img_vis, limbs[i], meta.joint_self.joints[i], FONT_HERSHEY_PLAIN, 1, Scalar(255, 100, 100), 1.5);
   }
   
   line(img_vis, meta.objpos+Point2f(-368/2,-368/2), meta.objpos+Point2f(368/2,-368/2), CV_RGB(0,255,0), 2);
@@ -939,7 +1030,11 @@ void DataTransformer<Dtype>::visualize(Mat& img, MetaData meta, AugmentSelection
   for(int p=0;p<meta.numOtherPeople;p++){
     rectangle(img_vis, meta.objpos_other[p]-Point2f(3,3), meta.objpos_other[p]+Point2f(3,3), CV_RGB(0,255,255), CV_FILLED);
     for(int i=0;i<np;i++){
-      circle(img_vis, meta.joint_others[p].joints[i], 2, CV_RGB(0,0,255), -1);
+      // plot only visible joints
+      if(meta.joint_others[p].isVisible[i] > 0)
+        circle(img_vis, meta.joint_others[p].joints[i], 2, CV_RGB(0,0,255), -1);
+      if(param_.visualize_names())
+        putText(img_vis, limbs[i], meta.joint_self.joints[i], FONT_HERSHEY_PLAIN, 1, Scalar(255, 100, 100), 1.5);
     }
   }
   

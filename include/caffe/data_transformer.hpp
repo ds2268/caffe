@@ -154,15 +154,15 @@ class DataTransformer {
     int epoch;
     Point2f objpos; //objpos_x(float), objpos_y (float)
     float scale_self;
-    Joints joint_self; //(3*16)
+    Joints joint_self; //(3*17)
 
     vector<Point2f> objpos_other; //length is numOtherPeople
     vector<float> scale_other; //length is numOtherPeople
     vector<Joints> joint_others; //length is numOtherPeople
   };
 
-  void generateLabelMap(Dtype*, Mat&, MetaData meta);
-  void visualize(Mat& img, MetaData meta, AugmentSelection as);
+  void generateLabelMap(Dtype*, Mat&, MetaData &meta);
+  void visualize(Mat& img, MetaData &meta, AugmentSelection as);
 
   bool augmentation_flip(Mat& img, Mat& img_aug, MetaData& meta);
   float augmentation_rotate(Mat& img_src, Mat& img_aug, MetaData& meta);
@@ -195,7 +195,7 @@ class DataTransformer {
   void ReadMetaData(MetaData& meta, const string& data, size_t offset3, size_t offset1);
   void ReadMetaDataCOCO(MetaData& meta, const string& data, size_t offset3, size_t offset1);
   void TransformMetaJoints(MetaData& meta);
-  void TransformJoints(Joints& joints);
+  void TransformJoints(Joints& joints, Point2f &obj_pos, const string &dataset);
   void clahe(Mat& img, int, int);
   void putGaussianMaps(Dtype* entry, Point2f center, int stride, int grid_x, int grid_y, float sigma);
   void dumpEverything(Dtype* transformed_data, Dtype* transformed_label, MetaData);

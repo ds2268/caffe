@@ -459,6 +459,8 @@ message TransformationParameter {
   optional bool transform_body_joint = 38 [default = true];
   optional bool put_gaussian = 39 [default = true];
   optional bool visualize_label = 40 [default = false];
+  optional bool visualize_names = 41 [default = false];
+  optional string dataset_type = 42 [default = "JUMP"];
 }
 
 // Message that stores parameters used by ROIPoolingLayer
