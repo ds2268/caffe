@@ -1033,8 +1033,8 @@ void DataTransformer<Dtype>::visualize(Mat& img, MetaData &meta, AugmentSelectio
       // plot only visible joints
       if(meta.joint_others[p].isVisible[i] > 0)
         circle(img_vis, meta.joint_others[p].joints[i], 2, CV_RGB(0,0,255), -1);
-      if(param_.visualize_names())
-        putText(img_vis, limbs[i], meta.joint_self.joints[i], FONT_HERSHEY_PLAIN, 1, Scalar(255, 100, 100), 1.5);
+        if(param_.visualize_names())
+            putText(img_vis, limbs[i], meta.joint_self.joints[i], FONT_HERSHEY_PLAIN, 1, Scalar(255, 100, 100), 1.5);
     }
   }
   
